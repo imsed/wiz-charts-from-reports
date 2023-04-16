@@ -21,7 +21,7 @@ selected_project = 'All Projects'
 pie_chart_filters = ['Status','Severity','Project Names','Resource Platform', 'Subscription ID', 'Resource Region', 'Resource Type']
 
 # list of use cases for line charts. These are based on the column names. If you need a new use case for line charts just add it to the list
-line_chart_filters = ['Severity','Resource Platform','Subscription ID','Resource Region','Resource Type']
+line_chart_filters = ['Project Names','Severity','Resource Platform','Subscription ID']
 
 # convert  datacolumns to datetime format 
 origin_df['Created At'] = pd.to_datetime(origin_df['Created At'])
@@ -63,6 +63,11 @@ RESOURCE_PLATFORMS =  ['All Resource Platforms'] + list(df['Resource Platform'].
 
 # list of available subscription IDs
 SUBSCRIPTON_IDS =  ['All Subscriptions'] + list(df['Subscription ID'].unique())
+
+# list of available Severities
+
+SEVERITIES = ['All Severities','CRITICAL','HIGH','MEDIUM','LOW','INFORMATIONAL']
+
 
 
 def pie_chart_use_cases(df, selected_project)->list:
@@ -171,7 +176,37 @@ def pie_chart_use_cases(df, selected_project)->list:
     # Return the list of pie charts
     return pie_charts
 
-def line_chart_use_cases (df)->list:
+def cumulative_line_chart_df(df):
+    created_issues_daily_count = df.set_index('Created At').resample('D').size().fillna(0).reset_index(name='Count_created')
+    resolved_issues_daily_count = df[df['Status'] == 'RESOLVED'].set_index('Resolved Time').resample('D').size().fillna(0).reset_index(name='Count_resolved')   
+    # Merge created and resolved counts into a single DataFrame based on date using an outer join
+    if not created_issues_daily_count.empty and not resolved_issues_daily_count.empty:
+        open_issues_count = pd.merge(created_issues_daily_count, resolved_issues_daily_count, left_on='Created At', right_on='Resolved Time', how='outer', suffixes=('_created', '_resolved'))
+    else:
+        if created_issues_daily_count.empty and resolved_issues_daily_count.empty:
+            open_issues_count = pd.DataFrame(columns=['Created At', 'Resolved Time', 'Count_created', 'Count_resolved'])
+        elif created_issues_daily_count.empty:
+            open_issues_count = resolved_issues_daily_count.copy()
+            open_issues_count['Created At'] = open_issues_count['Resolved Time']
+            open_issues_count['Count_created'] = 0
+        else:
+            open_issues_count = created_issues_daily_count.copy()
+            open_issues_count['Resolved Time'] = open_issues_count['Created At']
+            open_issues_count['Count_resolved'] = 0
+
+    # Fill any missing values in the 'Count_created' and 'Count_resolved' columns with 0
+    open_issues_count['Count_created'] = open_issues_count['Count_created'].fillna(0)
+    open_issues_count['Count_resolved'] = open_issues_count['Count_resolved'].fillna(0)
+
+    # Use either 'Created At' or 'Resolved Time' as the 'Date' column and fill any missing values
+    open_issues_count['Date'] = open_issues_count['Created At'].fillna(open_issues_count['Resolved Time'])
+
+    # Calculate the cumulative sum of open issues
+    open_issues_count['Cumulative Open'] = open_issues_count['Count_created'] - open_issues_count['Count_resolved']
+    open_issues_count['Cumulative Open'] = open_issues_count['Cumulative Open'].cumsum()
+    return open_issues_count
+
+def line_chart_use_cases (df,selected_project)->list:
     """
     Creates a list of Line charts Based on line_chart_filters
 
@@ -184,30 +219,32 @@ def line_chart_use_cases (df)->list:
     # Initialize an empty list to store the line chart data and layout for each filter option
     line_charts =[]
 
-    # Get all unique values of status
-    status_values = df['Status'].unique()
-
     # Loop over all filter options
     for filter in line_chart_filters:
         # Initialize an empty list to store the line chart data for the current filter option
         line_charts_data =[]
-        
-        # Loop over all unique status values
-        for status in status_values:
-            # For resolved issues, compute daily count based on 'Resolved Time' for all and by filter option
-            if status == 'RESOLVED':
-                resolved_issues_daily_count = df[df['Status'] == status].set_index('Resolved Time').resample('D').size().fillna(0).reset_index(name='Count')
-                line_charts_data+=[{'x': resolved_issues_daily_count['Resolved Time'], 'y': resolved_issues_daily_count['Count'], 'type': 'line', 'name': 'RESOLVED - ALL'}]
-                resolved_issues_daily_byfilter_counts = df[df['Status'] == status].set_index('Resolved Time').groupby(filter).resample('D')[filter].count().fillna(0).reset_index(name='Count')
-                line_charts_data+=[{'x': resolved_issues_daily_byfilter_counts[resolved_issues_daily_byfilter_counts[filter] == s]['Resolved Time'], 'y': resolved_issues_daily_byfilter_counts[resolved_issues_daily_byfilter_counts[filter] == s]['Count'], 'type': 'line', 'name': f'RESOLVED - {s[:36]}'} for s in df[filter].unique()]
 
-            # For open issues, compute daily count based on 'Created At' for all and by filter option
-            else:
-                status_issues_daily_count = df[df['Status'] == status].set_index('Created At').resample('D').size().fillna(0).reset_index(name='Count')
-                line_charts_data+=[{'x': status_issues_daily_count['Created At'], 'y': status_issues_daily_count['Count'], 'type': 'line', 'name': f'{status} - ALL'}]
+        # Calculate daily counts for All created and ALL resolved issues
+        open_issues_count = cumulative_line_chart_df(df)
+        line_charts_data+=[{'x': open_issues_count['Date'], 'y': open_issues_count['Cumulative Open'], 'type': 'line', 'name': 'ALL'}]
 
-                status_issues_daily_byfilter_counts = df[df['Status'] == status].set_index('Created At').groupby(filter).resample('D')[filter].count().fillna(0).reset_index(name='Count')
-                line_charts_data+=[{'x': status_issues_daily_byfilter_counts[status_issues_daily_byfilter_counts[filter] == s]['Created At'], 'y': status_issues_daily_byfilter_counts[status_issues_daily_byfilter_counts[filter] == s]['Count'], 'type': 'line', 'name': f'{status} - {s[:36]}'} for s in df[filter].unique()]
+        # Calculate daily counts for created and resolved issues by project (special filter, uses contains instead of equal)
+        if filter == "Project Names":
+                if selected_project == 'All Projects':
+                    wiz_projects = [p for p in WIZ_PROJECTS if p !=  'All Projects']
+                else:
+                    wiz_projects = [selected_project]
+                for project_name in wiz_projects:
+                    df_filter= df [df[filter].str.contains(project_name)]
+                    open_issues_count = cumulative_line_chart_df(df_filter)
+                    line_charts_data+=[{'x': open_issues_count['Date'], 'y': open_issues_count['Cumulative Open'], 'type': 'line', 'name': f'{project_name[:36]}'}]
+
+        else:    
+        # Calculate daily counts for created and resolved issues by filter
+            for f in df[filter].unique():
+                df_filter = df[df[filter]==f]
+                open_issues_count = cumulative_line_chart_df(df_filter)
+                line_charts_data+=[{'x': open_issues_count['Date'], 'y': open_issues_count['Cumulative Open'], 'type': 'line', 'name': f'{f[:36]}'}]
 
         # Combine all line chart data for the current filter option
         filter_line_chart_data = (line_charts_data)
@@ -282,9 +319,9 @@ pie_charts = pie_chart_use_cases(df, 'All Projects')
 pie_charts_div = html.Div(children=list(generate_pie_chart_div(pie_charts).values()))
 
 # Generate line charts
-line_charts = line_chart_use_cases(df)
+line_charts = line_chart_use_cases(df,'All Projects')
 line_charts_html = [
-    dcc.Graph(id=chart['id'], figure=create_figure_chart(chart['data'], chart['layout']), style={'width': '50%'})
+    dcc.Graph(id=chart['id'], figure=create_figure_chart(chart['data'], chart['layout']), style={'width': '100%'})
     for chart in line_charts
 ]
 # Combine the line charts into a single div
@@ -302,6 +339,13 @@ app.layout = html.Div(children=[
             id='project-dropdown',
             options=[{'label': i, 'value': i} for i in  WIZ_PROJECTS],
             value='All Projects',
+            style={'width': '300px'}
+        ),
+        html.Label('Severity'),
+        dcc.Dropdown(
+            id='severity-dropdown',
+            options=[{'label': i, 'value': i} for i in  SEVERITIES],
+            value='All Severities',
             style={'width': '300px'}
         ),
         html.Label('Resource Platform'),
@@ -338,9 +382,9 @@ output_line_charts = [dash.dependencies.Output(chart['id'], 'figure') for chart 
 # Define the callback function to update the charts based on user inputs 
 @app.callback(
     output_line_charts, output_id_div_filters,
-    [dash.dependencies.Input('project-dropdown', 'value'),dash.dependencies.Input('csp-dropdown', 'value'),dash.dependencies.Input('subscription-dropdown', 'value')]
+    [dash.dependencies.Input('project-dropdown', 'value'),dash.dependencies.Input('severity-dropdown', 'value'),dash.dependencies.Input('csp-dropdown', 'value'),dash.dependencies.Input('subscription-dropdown', 'value')]
 )
-def update_chart(selected_project, selected_csp, selected_subscription)->list:
+def update_chart(selected_project, selected_severity,selected_csp, selected_subscription)->list:
     """
     This function is called when the user selects an option in any of the dropdown menus. 
     It updates the charts displayed on the web page based on the selected inputs. 
@@ -351,6 +395,11 @@ def update_chart(selected_project, selected_csp, selected_subscription)->list:
     if selected_project != 'All Projects':
         df = df[df['Project Names'].str.contains(selected_project)]
 
+    # Filter the data based on the severity
+
+    if selected_severity != 'All Severities':
+        df = df[df['Severity'] == selected_severity]
+
     # Filter the data based on the selected resource platform
     if selected_csp != 'All Resource Platforms':
         df = df[df['Resource Platform'] == selected_csp]
@@ -358,6 +407,8 @@ def update_chart(selected_project, selected_csp, selected_subscription)->list:
     # Filter the data based on the selected subscription ID
     if selected_subscription != 'All Subscriptions':
         df = df[df['Subscription ID'] == selected_subscription]
+
+
     
     # Refresh the pie charts based on the filtered data
     refresh_pie_charts = pie_chart_use_cases(df, selected_project)
@@ -370,7 +421,7 @@ def update_chart(selected_project, selected_csp, selected_subscription)->list:
             div_children.append(pie_chart_divs[filter_name])
 
     # Refresh the line charts based on the filtered data
-    refresh_line_charts = line_chart_use_cases(df)
+    refresh_line_charts = line_chart_use_cases(df,selected_project)
     updated_line_charts_figure = [create_figure_chart(chart['data'], chart['layout']) for chart in refresh_line_charts]
 
     # Return the updated line charts and pie charts as a list of figures and divs
@@ -378,7 +429,9 @@ def update_chart(selected_project, selected_csp, selected_subscription)->list:
 
 @app.callback(
     [dash.dependencies.Output('subscription-dropdown', 'value'),
-     dash.dependencies.Output('subscription-dropdown', 'options')],
+     dash.dependencies.Output('subscription-dropdown', 'options'),
+     dash.dependencies.Output('severity-dropdown', 'value'),
+     dash.dependencies.Output('severity-dropdown', 'options')],
     [dash.dependencies.Input('project-dropdown', 'value'),
      dash.dependencies.Input('csp-dropdown', 'value')]
 )
@@ -398,12 +451,17 @@ def update_dropdowns(selected_project, selected_csp):
     
     # Get the list of unique resource platforms and subscription IDs
     subscription_ids = df['Subscription ID'].unique()
+
+    severities = df ['Severity'].unique()
     
     # Create a list of dictionaries for the options in the dropdown boxes
     subscription_options = [{'label': 'All Subscriptions', 'value': 'All Subscriptions'}] + [{'label': subscription, 'value': subscription} for subscription in subscription_ids]
     
+    severity_options = [{'label': 'All Severities', 'value': 'All Severities'}] + [{'label': severity, 'value': severity} for severity in severities]
+
+    
     # Return the default value and the updated list of options for the subscription dropdown
-    return 'All Subscriptions', subscription_options
+    return 'All Subscriptions', subscription_options, 'All Severities',severity_options
 
 
 # Run the app
