@@ -178,7 +178,7 @@ def pie_chart_use_cases(df, selected_project)->list:
 
 def cumulative_line_chart_df(df):
     created_issues_daily_count = df.set_index('Created At').resample('D').size().fillna(0).reset_index(name='Count_created')
-    resolved_issues_daily_count = df[df['Status'] == 'RESOLVED'].set_index('Resolved Time').resample('D').size().fillna(0).reset_index(name='Count_resolved')   
+    resolved_issues_daily_count = df[df['Status'].isin(['RESOLVED', 'REJECTED'])].set_index('Resolved Time').resample('D').size().fillna(0).reset_index(name='Count_resolved')   
     # Merge created and resolved counts into a single DataFrame based on date using an outer join
     if not created_issues_daily_count.empty and not resolved_issues_daily_count.empty:
         open_issues_count = pd.merge(created_issues_daily_count, resolved_issues_daily_count, left_on='Created At', right_on='Resolved Time', how='outer', suffixes=('_created', '_resolved'))
