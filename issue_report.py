@@ -25,7 +25,7 @@ line_chart_filters = ['Project Names','Severity','Resource Platform','Subscripti
 
 # convert  datacolumns to datetime format 
 origin_df['Created At'] = pd.to_datetime(origin_df['Created At'])
-origin_df['Resolved Time'] = pd.to_datetime(origin_df['Resolved Time'])
+origin_df['Resolved Time'] = pd.to_datetime(origin_df['Resolved Time'].str.replace(' UTC', ''))
 
 # fill empty values with defaults
 origin_df['Subscription ID'].fillna(value='No Subscription', inplace=True)
