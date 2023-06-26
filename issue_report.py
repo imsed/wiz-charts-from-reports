@@ -18,14 +18,15 @@ wiz_colors = {'OPEN': 'red', 'RESOLVED': 'green','IN_PROGRESS':'orange','INFORMA
 selected_project = 'All Projects'
 
 # list of use cases for pie charts. These are based on the column names. If you need a new use case for pie charts just add it to the list
-pie_chart_filters = ['Status','Severity','Project Names','Resource Platform', 'Subscription ID', 'Resource Region', 'Resource Type']
+pie_chart_filters = ['Status','Severity','Project Names','Resource Platform', 'Subscription ID', 'Resource Region','Resource Type']
 
 # list of use cases for line charts. These are based on the column names. If you need a new use case for line charts just add it to the list
-line_chart_filters = ['Project Names','Severity','Resource Platform','Subscription ID']
+line_chart_filters = ['Project Names','Severity','Resource Platform','Subscription ID','Resource Region','Resource Type']
 
 # convert  datacolumns to datetime format 
 origin_df['Created At'] = pd.to_datetime(origin_df['Created At'])
-origin_df['Resolved Time'] = pd.to_datetime(origin_df['Resolved Time'].str.replace(' UTC', ''))
+origin_df['Resolved Time'] = pd.to_datetime(origin_df['Resolved Time'].str.replace(' +0000 +0000', ''))
+
 
 # fill empty values with defaults
 origin_df['Subscription ID'].fillna(value='No Subscription', inplace=True)
@@ -110,10 +111,10 @@ def pie_chart_use_cases(df, selected_project)->list:
     }
     pie_charts.append(graph)
     
-    if selected_project == 'All Projects':
-        wiz_projects = WIZ_PROJECTS
+    if 'All Projects' in selected_project:
+        wiz_projects = [p for p in WIZ_PROJECTS if p !=  'All Projects']
     else:
-        wiz_projects = [selected_project] 
+        wiz_projects = selected_project
     # Loop over filter use cases and compute the necessary counts
     for filter in pie_chart_filters:
         if filter == 'Project Names':
@@ -123,7 +124,7 @@ def pie_chart_use_cases(df, selected_project)->list:
                 values = []
                 for project_name in wiz_projects:
                     labels.append(project_name)
-                    values.append(df[df['Status'] == status][filter].str.contains(project_name).sum())
+                    values.append(df[df['Status'] == status][filter].str.split(', ').apply(lambda x: any([k for k in x if k == project_name])).sum())
                 status_issues_byfilter_pie_chart_data = [
                     {
                         'labels': labels,
@@ -229,13 +230,15 @@ def line_chart_use_cases (df,selected_project)->list:
         line_charts_data+=[{'x': open_issues_count['Date'], 'y': open_issues_count['Cumulative Open'], 'type': 'line', 'name': 'ALL'}]
 
         # Calculate daily counts for created and resolved issues by project (special filter, uses contains instead of equal)
+
+
         if filter == "Project Names":
-                if selected_project == 'All Projects':
+                if 'All Projects' in selected_project:
                     wiz_projects = [p for p in WIZ_PROJECTS if p !=  'All Projects']
                 else:
-                    wiz_projects = [selected_project]
-                for project_name in wiz_projects:
-                    df_filter= df [df[filter].str.contains(project_name)]
+                    wiz_projects = selected_project
+                for project_name in wiz_projects:                    
+                    df_filter= df [df[filter].str.split(', ').apply(lambda x: any([k for k in x if k == project_name]))]
                     open_issues_count = cumulative_line_chart_df(df_filter)
                     line_charts_data+=[{'x': open_issues_count['Date'], 'y': open_issues_count['Cumulative Open'], 'type': 'line', 'name': f'{project_name[:36]}'}]
 
@@ -321,7 +324,7 @@ pie_charts_div = html.Div(children=list(generate_pie_chart_div(pie_charts).value
 # Generate line charts
 line_charts = line_chart_use_cases(df,'All Projects')
 line_charts_html = [
-    dcc.Graph(id=chart['id'], figure=create_figure_chart(chart['data'], chart['layout']), style={'width': '100%'})
+    dcc.Graph(id=chart['id'], figure=create_figure_chart(chart['data'], chart['layout']), style={'width': '50%'})
     for chart in line_charts
 ]
 # Combine the line charts into a single div
@@ -339,7 +342,8 @@ app.layout = html.Div(children=[
             id='project-dropdown',
             options=[{'label': i, 'value': i} for i in  WIZ_PROJECTS],
             value='All Projects',
-            style={'width': '300px'}
+            style={'width': '300px'},
+            multi=True
         ),
         html.Label('Severity'),
         dcc.Dropdown(
@@ -392,22 +396,23 @@ def update_chart(selected_project, selected_severity,selected_csp, selected_subs
     df = origin_df
     
     # Filter the data based on the selected project
-    if selected_project != 'All Projects':
-        df = df[df['Project Names'].str.contains(selected_project)]
+    if 'All Projects' not in selected_project:
+        df = df[df['Project Names'].str.split(', ').apply(lambda x: any([k for k in x if k in selected_project]))]
+        
+
 
     # Filter the data based on the severity
 
-    if selected_severity != 'All Severities':
+    if 'All Severities' not in selected_severity:
         df = df[df['Severity'] == selected_severity]
 
     # Filter the data based on the selected resource platform
-    if selected_csp != 'All Resource Platforms':
+    if 'All Resource Platforms' not in selected_csp:
         df = df[df['Resource Platform'] == selected_csp]
     
     # Filter the data based on the selected subscription ID
-    if selected_subscription != 'All Subscriptions':
+    if 'All Subscriptions' not in selected_subscription:
         df = df[df['Subscription ID'] == selected_subscription]
-
 
     
     # Refresh the pie charts based on the filtered data
@@ -441,10 +446,10 @@ def update_dropdowns(selected_project, selected_csp):
     It updates the Subscription ID drop down menu 
     """
     # Filter the dataframe based on the selected project and resource platform
-    if selected_project == 'All Projects':
+    if 'All Projects'  in selected_project:
         df = origin_df
     else:
-        df = origin_df[origin_df['Project Names'].str.contains(selected_project)]
+        df = origin_df[origin_df['Project Names'].str.split(',').apply(lambda x: any([k for k in x if k in selected_project]))]
     
     if selected_csp != 'All Resource Platforms':
         df = df[df['Resource Platform'] == selected_csp]
@@ -459,12 +464,10 @@ def update_dropdowns(selected_project, selected_csp):
     
     severity_options = [{'label': 'All Severities', 'value': 'All Severities'}] + [{'label': severity, 'value': severity} for severity in severities]
 
-    
-    # Return the default value and the updated list of options for the subscription dropdown
-    return 'All Subscriptions', subscription_options, 'All Severities',severity_options
+    # Return the default value and the updated list of options for the dropdowns
+    return 'All Subscriptions', subscription_options, 'All Severities', severity_options
 
 
 # Run the app
 if __name__ == '__main__':
     app.run_server(debug=True)
-
