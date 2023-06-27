@@ -449,7 +449,7 @@ def update_dropdowns(selected_project, selected_csp):
     if 'All Projects'  in selected_project:
         df = origin_df
     else:
-        df = origin_df[origin_df['Project Names'].str.split(',').apply(lambda x: any([k for k in x if k in selected_project]))]
+        df = origin_df[origin_df['Project Names'].str.split(', ').apply(lambda x: any([k for k in x if k in selected_project]))]
     
     if selected_csp != 'All Resource Platforms':
         df = df[df['Resource Platform'] == selected_csp]
