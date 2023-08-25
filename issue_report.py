@@ -24,8 +24,10 @@ pie_chart_filters = ['Status','Severity','Project Names','Resource Platform', 'S
 line_chart_filters = ['Project Names','Severity','Resource Platform','Subscription ID','Resource Region','Resource Type']
 
 # convert  datacolumns to datetime format 
+resolve_date_format = "%Y-%m-%d %H:%M:%S.%f %z UTC"
 origin_df['Created At'] = pd.to_datetime(origin_df['Created At'])
-origin_df['Resolved Time'] = pd.to_datetime(origin_df['Resolved Time'].str.replace(' +0000 +0000', ''))
+origin_df['Resolved Time'] = pd.to_datetime(origin_df['Resolved Time'],format=resolve_date_format)
+
 
 
 # fill empty values with defaults
