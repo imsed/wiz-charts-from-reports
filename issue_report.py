@@ -24,9 +24,17 @@ pie_chart_filters = ['Status','Severity','Project Names','Resource Platform', 'S
 line_chart_filters = ['Project Names','Severity','Resource Platform','Subscription ID','Resource Region','Resource Type']
 
 # convert  datacolumns to datetime format 
-resolve_date_format = "%Y-%m-%d %H:%M:%S.%f %z UTC"
+def normalize_datetime(date_str):
+    try:
+        # Attempt to directly convert using the specified format
+        return pd.to_datetime(date_str, format="%Y-%m-%d %H:%M:%S.%f %z UTC")
+    except ValueError:
+        # If the above fails, try removing the duplicated time zone indication and then convert
+        cleaned_str = date_str.replace(' +0000 +0000', ' +0000')
+        return pd.to_datetime(cleaned_str, format="%Y-%m-%d %H:%M:%S.%f %z")
+    
 origin_df['Created At'] = pd.to_datetime(origin_df['Created At'])
-origin_df['Resolved Time'] = pd.to_datetime(origin_df['Resolved Time'],format=resolve_date_format)
+origin_df['Resolved Time'] = origin_df['Resolved Time'].apply(normalize_datetime)
 
 
 
